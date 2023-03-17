@@ -40,12 +40,21 @@ app.use(express.json())
 
     const inspectIsAdmMiddlewares = (request,response,next) => {
     const user = request.user
-    console.log(typeof user.isAdm)
     if(!user.isAdm){
         return response.status(403).json({message:"Missing admin permission"})
     }
 
     next()
+    }
+    
+    const verifyOwnerMiddlewares = ({user,params},response,next) => {
+        const {isAdm,uuid} = user
+        const {id} = params 
+        if(!isAdm && uuid !== id){
+            return response.status(403).json({message:"Missing admin permission"})
+        }
+
+        next()
     }
 
 // SERVICES -> Cuida da lógica de negócio e da manipulação de dados
@@ -65,18 +74,11 @@ app.use(express.json())
             password: await hash(body.password,10),
         }
 
-        const user = {
-            uuid: userData.uuid,
-            createdOn: new Date(),
-            updatedOn: new Date(),
-            ...body
-        }
-
-        delete user.password
+        const {password,...rest} = userData
 
         users.push(userData)
 
-        return [201,user]
+        return [201,rest]
     }
 
     const createSessionServices = async ({email,password}) => {
@@ -108,62 +110,34 @@ app.use(express.json())
 
     const fetchUserServices = (id) => {
         const userData = users.find(element => element.uuid === id)
+        
+        const{password, ...rest} = userData
 
-        const user = {...userData}
-        delete user.password
-        return [201,user]
+        return [201,rest]
     }
 
-    const updatedUserServices = async (tokenData,id,userData) => {
-        const isAdm = tokenData.isAdm
-
-        if(isAdm){
-            const user = users.find(element => element.uuid === id)
-
-            for(const property in userData){
-                if(property !== "isAdm"){
-                    user[property] = userData[property]
-                }
-            }
-                user.updatedOn = new Date()
-                user.password = await hash(user.password,10)
-                const newUser = {...user}
-                delete newUser.password
-            return [200,newUser]
-        }else{
-
-            if(tokenData.uuid !== id){
-                return [403,{message:"Missing admin permission"}]
-            }
-            const user = users.find(element => element.uuid === id)
-
-            for(const property in userData){
-                if(property !== "isAdm"){
-                    user[property] = userData[property]
-                }
-            }   
-                user.updatedOn = new Date()
-                user.password = await hash(user.password,10)
-                const newUser = {...user}
-                delete newUser.password
-               
-            return [200,newUser] 
-        }
+    const updatedUserServices = async (id,userData) => {
+        
+        let index = users.findIndex(element => element.uuid === id)
+        
+        userData.password?
+        (userData.password = await hash(users[index].password,10))    
+        :
+        (userData.password = users[index].password)
+                          
+        users[index] = {...users[index],...userData}
+        const {password,...rest} = users[index]
+    
+            return [200,rest]
+      
     }
 
-    const deleteUserServices = (userData,id) => {
-        if(userData.isAdm){
+    const deleteUserServices = (id) => {
+       
             const index = users.findIndex(element => element.uuid === id)
             users.splice(index,1)
             return [204,{}]
-        }else{
-            if(userData.uuid !== id){
-                return [403,{message: "Missing admin permission"}]
-            }
-            const index = users.findIndex(element => element.uuid === id)
-            users.splice(index,1)
-            return [204,{}]
-        }
+      
     }
 
 // CONTROLLERS -> Recebem os dados da requisição do cliente, e retornam uma resposta para o cliente
@@ -187,12 +161,12 @@ app.use(express.json())
     }
 
     const updatedUserControllers = async (request,response) => {
-        const [status,user] = await updatedUserServices(request.user,request.params.id,request.body)
+        const [status,user] = await updatedUserServices(request.params.id,request.body)
         return response.status(status).json(user)
     }
 
     const deleteUserControllers = (request,response) => {
-        const [status,data] = deleteUserServices(request.user,request.params.id)
+        const [status,data] = deleteUserServices(request.params.id)
         return response.status(status).json(data)
     }
 
@@ -202,11 +176,11 @@ app.post("/users",createUserControllers)
 app.post("/login",createSessionControllers)
 app.get("/users", inspectTokenMiddlewares,inspectIsAdmMiddlewares,listUsersControllers)
 app.get("/users/profile",inspectTokenMiddlewares,fetchUserControllers)
-app.patch("/users/:id",inspectTokenMiddlewares,updatedUserControllers)
-app.delete("/users/:id",inspectTokenMiddlewares,deleteUserControllers)
+app.patch("/users/:id",inspectTokenMiddlewares,verifyOwnerMiddlewares,updatedUserControllers)
+app.delete("/users/:id",inspectTokenMiddlewares,verifyOwnerMiddlewares,deleteUserControllers)
 
-app.listen("3002", () => {
-    console.log("Server running in port 3002")
+app.listen("3003", () => {
+    console.log("Server running in port 3003")
 })
 
 export default app
